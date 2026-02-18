@@ -96,7 +96,7 @@ This is the standard workflow for the **Destination Home** project.
 
 ## 🤝 Credits
 
-* **HDK Commander (GUI):** [JuliusJoker]
+* **HDK Commander (GUI):** [JuliusJoker](https://github.com/JuliusJoker92)
 * **hdk-cli (Core Logic):** [ZephyrCodesStuff](https://github.com/ZephyrCodesStuff/hdk-cli)
 
 ## 📄 License
