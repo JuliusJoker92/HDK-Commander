@@ -7,7 +7,7 @@
 
 ## 📖 Overview
 
-**HDK Commander** streamlines the complex workflow of editing PlayStation Home scenes. It allows users to turn "Online-Only" scenes (which crash RPCS3) into "Local Offline" scenes that load instantly from the hard drive.
+**HDK Commander** streamlines the complex workflow of editing PlayStation Home scenes. It allows users to turn "Online-Only" scenes into "Local Offline" scenes and more.
 
 **Key Features:**
 * **📦 Smart Extraction:** Auto-detects and unpacks `.pkg`, `.sdat`, `.bar`, and `.sharc` files.
