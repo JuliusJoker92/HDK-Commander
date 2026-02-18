@@ -4,7 +4,6 @@
 
 > **Note:** This is a graphical interface (GUI) for the powerful [hdk-cli](https://github.com/ZephyrCodesStuff/hdk-cli). It allows you to extract, modify, and repack PlayStation Home files without touching a command line.
 
-![HDK Commander Dashboard](https://via.placeholder.com/800x400?text=HDK+Commander+Dashboard)
 
 ## 📖 Overview
 
