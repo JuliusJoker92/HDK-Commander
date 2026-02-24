@@ -67,6 +67,28 @@ if %errorlevel% neq 0 (
 )
 for /f "tokens=*" %%i in ('cargo --version 2^>^&1') do echo [OK] %%i found.
 
+:: Java (needed for LUAC Decompiler)
+java -version >nul 2>&1
+if %errorlevel% neq 0 (
+    echo.
+    echo [WARNING] Java is not installed!
+    echo.
+    echo   Java is required for the LUAC Decompiler (unluac-verbose.jar).
+    echo   All other HDK Commander features will work without it.
+    echo.
+    echo   Download Java from: https://adoptium.net/
+    echo   Or install with:    winget install EclipseAdoptium.Temurin.21.JRE
+    echo.
+    echo   Continuing setup without Java...
+    echo.
+) else (
+    for /f "tokens=*" %%i in ('java -version 2^>^&1') do (
+        echo [OK] Java found: %%i
+        goto :java_done
+    )
+)
+:java_done
+
 echo.
 echo [OK] All prerequisites satisfied!
 echo.
@@ -169,7 +191,37 @@ echo     Location: hdk-resharc\target\release\hdk-resharc.exe
 echo.
 
 :: =====================================================
-:: 7. VERIFY & LAUNCH
+:: 7. CHECK FOR UNLUAC JAR
+:: =====================================================
+echo ---------------------------------------------------
+echo   Checking for LUAC Decompiler (unluac-verbose.jar)
+echo ---------------------------------------------------
+set UNLUAC_FOUND=
+if exist "unluac-verbose.jar" (
+    set UNLUAC_FOUND=unluac-verbose.jar
+) else if exist "unluac.jar" (
+    set UNLUAC_FOUND=unluac.jar
+) else if exist "tools\unluac-verbose.jar" (
+    set UNLUAC_FOUND=tools\unluac-verbose.jar
+) else if exist "tools\unluac.jar" (
+    set UNLUAC_FOUND=tools\unluac.jar
+)
+
+if defined UNLUAC_FOUND (
+    echo [OK] Found: %UNLUAC_FOUND%
+) else (
+    echo [INFO] unluac-verbose.jar not found in this folder.
+    echo.
+    echo   To use the LUAC Decompiler tab, download unluac-verbose.jar
+    echo   and place it in this folder, or use the 'Change...' button
+    echo   in HDK Commander to locate it.
+    echo.
+    echo   Download: https://github.com/HansWessworking/unluac
+)
+echo.
+
+:: =====================================================
+:: 8. VERIFY & LAUNCH
 :: =====================================================
 echo.
 echo ===================================================
@@ -178,6 +230,11 @@ echo ===================================================
 echo.
 echo   hdk-cli:     hdk-cli\target\release\hdk.exe
 echo   hdk-resharc: hdk-resharc\target\release\hdk-resharc.exe
+if defined UNLUAC_FOUND (
+    echo   unluac:      %UNLUAC_FOUND%
+) else (
+    echo   unluac:      (not found -- set path in HDK Commander)
+)
 echo.
 echo   Launching HDK Commander...
 echo.

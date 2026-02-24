@@ -99,6 +99,31 @@ else
     fi
 fi
 
+# Java (needed for LUAC Decompiler tab)
+if command -v java &>/dev/null; then
+    JAVA_VERSION=$(java -version 2>&1 | head -n 1)
+    echo -e "${GREEN}[OK]${NC} Java found: $JAVA_VERSION"
+else
+    echo -e "${YELLOW}[WARNING]${NC} Java is not installed!"
+    echo ""
+    echo "  Java is required for the LUAC Decompiler (unluac-verbose.jar)."
+    echo "  All other HDK Commander features will work without it."
+    echo ""
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        echo "  macOS install options:"
+        echo "    brew install openjdk"
+        echo "    Or download from: https://adoptium.net/"
+    else
+        echo "  Linux install options:"
+        echo "    Ubuntu/Debian: sudo apt install default-jre"
+        echo "    Fedora:        sudo dnf install java-latest-openjdk"
+        echo "    Arch:          sudo pacman -S jre-openjdk"
+    fi
+    echo ""
+    echo "  Continuing setup without Java..."
+    echo ""
+fi
+
 echo ""
 echo -e "${GREEN}[OK] All prerequisites satisfied!${NC}"
 echo ""
@@ -199,7 +224,34 @@ echo "    Location: hdk-resharc/target/release/hdk-resharc"
 echo ""
 
 # =====================================================
-# 7. VERIFY & LAUNCH
+# 7. CHECK FOR UNLUAC JAR
+# =====================================================
+echo "---------------------------------------------------"
+echo "  Checking for LUAC Decompiler (unluac-verbose.jar)"
+echo "---------------------------------------------------"
+UNLUAC_FOUND=""
+for jar in "unluac-verbose.jar" "unluac.jar" "tools/unluac-verbose.jar" "tools/unluac.jar"; do
+    if [ -f "$jar" ]; then
+        UNLUAC_FOUND="$jar"
+        break
+    fi
+done
+
+if [ -n "$UNLUAC_FOUND" ]; then
+    echo -e "${GREEN}[OK]${NC} Found: $UNLUAC_FOUND"
+else
+    echo -e "${YELLOW}[INFO]${NC} unluac-verbose.jar not found in this folder."
+    echo ""
+    echo "  To use the LUAC Decompiler tab, download unluac-verbose.jar"
+    echo "  and place it in this folder, or use the 'Change...' button"
+    echo "  in HDK Commander to locate it."
+    echo ""
+    echo "  Download: https://github.com/HansWessworking/unluac"
+fi
+echo ""
+
+# =====================================================
+# 8. VERIFY & LAUNCH
 # =====================================================
 echo ""
 echo "==================================================="
@@ -208,6 +260,16 @@ echo "==================================================="
 echo ""
 echo "  hdk-cli:     hdk-cli/target/release/hdk"
 echo "  hdk-resharc: hdk-resharc/target/release/hdk-resharc"
+if [ -n "$UNLUAC_FOUND" ]; then
+    echo "  unluac:      $UNLUAC_FOUND"
+else
+    echo "  unluac:      (not found — set path in HDK Commander)"
+fi
+if command -v java &>/dev/null; then
+    echo "  java:        $(which java)"
+else
+    echo "  java:        (not installed — needed for LUAC Decompiler)"
+fi
 echo ""
 echo "  Launching HDK Commander..."
 echo ""
