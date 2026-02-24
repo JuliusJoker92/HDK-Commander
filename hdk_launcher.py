@@ -6,14 +6,16 @@ import os
 import sys
 import shutil
 import platform
+import json
 
 # =========================================================================
 # CONFIGURATION
 # =========================================================================
-# These are your default fallback paths. The tool will look here first.
-# Leave empty to rely on auto-detection.
 DEFAULT_HDK_PATH = r""
 DEFAULT_RESHARC_PATH = r""
+
+# Settings file — lives next to the script
+SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hdk_settings.json")
 
 # =========================================================================
 # PLATFORM DETECTION
@@ -22,10 +24,8 @@ IS_WINDOWS = sys.platform == "win32"
 IS_MAC = sys.platform == "darwin"
 IS_LINUX = sys.platform.startswith("linux")
 
-# Binary extension
 BIN_EXT = ".exe" if IS_WINDOWS else ""
 
-# Font choices (Segoe UI is Windows-only)
 if IS_MAC:
     FONT_MAIN = "SF Pro Text"
     FONT_HEADER = "SF Pro Display"
@@ -53,32 +53,39 @@ class HDKCommander(tk.Tk):
         self.resharc_path_var = tk.StringVar(value="Searching...")
         self.project_path = tk.StringVar(value="No Folder Selected")
 
-        # Build platform-aware search candidates
-        hdk_candidates = [
+        # Load saved settings (returns dict, may be empty)
+        self.settings = self._load_settings()
+
+        # Resolve binary paths: saved settings → manual default → auto-detect
+        found_hdk = self._resolve_binary_path("hdk_path", "hdk", DEFAULT_HDK_PATH, [
             f"hdk{BIN_EXT}",
             os.path.join("hdk-cli", "target", "release", f"hdk{BIN_EXT}"),
-        ]
-        resharc_candidates = [
+        ])
+        found_resharc = self._resolve_binary_path("resharc_path", "hdk-resharc", DEFAULT_RESHARC_PATH, [
             f"hdk-resharc{BIN_EXT}",
             os.path.join("hdk-resharc", "target", "release", f"hdk-resharc{BIN_EXT}"),
-        ]
-
-        # On Mac, also check common Homebrew/Cargo paths
-        if IS_MAC or IS_LINUX:
-            home = os.path.expanduser("~")
-            hdk_candidates.append(os.path.join(home, ".cargo", "bin", "hdk"))
-            resharc_candidates.append(os.path.join(home, ".cargo", "bin", "hdk-resharc"))
-
-        found_hdk = self._find_binary("hdk", DEFAULT_HDK_PATH, hdk_candidates)
-        found_resharc = self._find_binary("hdk-resharc", DEFAULT_RESHARC_PATH, resharc_candidates)
+        ])
 
         self.hdk_path_var.set(found_hdk if found_hdk else "NOT FOUND - Click Change...")
         self.resharc_path_var.set(found_resharc if found_resharc else "NOT FOUND - Click Change...")
 
+        # Restore project path from settings
+        saved_project = self.settings.get("project_path", "")
+        if saved_project and os.path.isdir(saved_project):
+            self.project_path.set(saved_project)
+
         self._setup_styles()
         self._setup_ui()
 
-        # Alerts for missing binaries
+        # Restore pack input from settings
+        saved_pack_input = self.settings.get("pack_input_path", "")
+        if saved_pack_input and os.path.isdir(saved_pack_input):
+            self.pack_input_var.set(saved_pack_input)
+
+        # Save settings on close
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        # Alerts for missing binaries (only on true first run)
         missing = []
         if not found_hdk:
             missing.append("hdk (hdk-cli)")
@@ -91,16 +98,69 @@ class HDKCommander(tk.Tk):
                 "Use the 'Change...' buttons at the top to locate them.\n"
                 "You can still use the features for whichever tool IS found.")
 
-    def _find_binary(self, name, manual_path, search_names):
-        """Generic binary finder: checks manual path, CWD-relative, then PATH."""
-        if manual_path and os.path.exists(manual_path):
-            return manual_path
+    # =========================================================================
+    # SETTINGS PERSISTENCE
+    # =========================================================================
+    def _load_settings(self):
+        """Load saved settings from JSON file."""
+        try:
+            if os.path.exists(SETTINGS_FILE):
+                with open(SETTINGS_FILE, 'r') as f:
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        return data
+        except Exception:
+            pass
+        return {}
 
+    def _save_settings(self):
+        """Save current paths to JSON file."""
+        hdk = self.hdk_path_var.get()
+        resharc = self.resharc_path_var.get()
+        project = self.project_path.get()
+        pack_input = self.pack_input_var.get() if hasattr(self, 'pack_input_var') else ""
+
+        data = {
+            "hdk_path": hdk if "NOT FOUND" not in hdk else "",
+            "resharc_path": resharc if "NOT FOUND" not in resharc else "",
+            "project_path": project if project != "No Folder Selected" else "",
+            "pack_input_path": pack_input if pack_input != "No folder selected" else "",
+        }
+
+        try:
+            with open(SETTINGS_FILE, 'w') as f:
+                json.dump(data, f, indent=2)
+        except Exception:
+            pass
+
+    def _on_close(self):
+        """Save settings and exit."""
+        self._save_settings()
+        self.destroy()
+
+    def _resolve_binary_path(self, settings_key, name, manual_default, candidates):
+        """Try: saved setting → manual default → auto-detect."""
+        # 1. Check saved setting
+        saved = self.settings.get(settings_key, "")
+        if saved and os.path.exists(saved):
+            return saved
+
+        # 2. Check manual default from config
+        if manual_default and os.path.exists(manual_default):
+            return manual_default
+
+        # 3. Auto-detect
+        if IS_MAC or IS_LINUX:
+            home = os.path.expanduser("~")
+            candidates.append(os.path.join(home, ".cargo", "bin", name))
+
+        return self._find_binary(name, candidates)
+
+    def _find_binary(self, name, search_names):
+        """Search CWD-relative paths, then system PATH."""
         for candidate in search_names:
-            # Check absolute paths directly
             if os.path.isabs(candidate) and os.path.exists(candidate):
                 return candidate
-            # Check relative to CWD
             full = os.path.join(os.getcwd(), candidate)
             if os.path.exists(full):
                 return full
@@ -108,9 +168,11 @@ class HDKCommander(tk.Tk):
         found = shutil.which(name)
         if found:
             return found
-
         return None
 
+    # =========================================================================
+    # STYLES
+    # =========================================================================
     def _setup_styles(self):
         style = ttk.Style(self)
         style.theme_use('clam')
@@ -141,6 +203,54 @@ class HDKCommander(tk.Tk):
         style.configure("TCheckbutton", background=bg_dark, foreground=text_color)
         style.configure("TRadiobutton", background=bg_dark, foreground=text_color)
 
+    # =========================================================================
+    # SCROLLABLE TAB HELPER
+    # =========================================================================
+    def _make_scrollable_tab(self, parent, padding=20):
+        """Creates a consistent scrollable frame inside a tab. Returns the inner frame to pack widgets into."""
+        canvas = tk.Canvas(parent, bg="#1e1e1e", highlightthickness=0)
+        scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
+
+        inner_frame = ttk.Frame(canvas, padding=padding)
+
+        inner_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas_window = canvas.create_window((0, 0), window=inner_frame, anchor="nw")
+
+        # Make inner frame expand to fill canvas width
+        def _on_canvas_resize(event):
+            canvas.itemconfig(canvas_window, width=event.width)
+        canvas.bind("<Configure>", _on_canvas_resize)
+
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        # Mouse wheel scrolling
+        def _on_mousewheel(event):
+            if canvas.winfo_exists():
+                if IS_MAC:
+                    canvas.yview_scroll(int(-1 * event.delta), "units")
+                else:
+                    canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        def _bind_wheel(event):
+            if IS_MAC:
+                canvas.bind_all("<MouseWheel>", _on_mousewheel)
+            else:
+                canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        def _unbind_wheel(event):
+            canvas.unbind_all("<MouseWheel>")
+
+        canvas.bind("<Enter>", _bind_wheel)
+        canvas.bind("<Leave>", _unbind_wheel)
+
+        return inner_frame
+
+    # =========================================================================
+    # UI SETUP
+    # =========================================================================
     def _setup_ui(self):
         # === HEADER / CONFIG AREA ===
         config_frame = ttk.Frame(self, padding=15)
@@ -205,15 +315,15 @@ class HDKCommander(tk.Tk):
         self.console.tag_configure("success", foreground="#44ff44")
         self.console.tag_configure("info", foreground="#4db8ff")
 
-        # Log platform info at startup
         self.log(f"Platform: {platform.system()} {platform.machine()} ({sys.platform})", "info")
+        if os.path.exists(SETTINGS_FILE):
+            self.log("Settings loaded from previous session.", "info")
 
     # =========================================================================
-    # TAB 1: EXTRACT (sdat x, sharc x, bar x, pkg x)
+    # TAB 1: EXTRACT
     # =========================================================================
     def _build_extract_tab(self, parent):
-        frame = ttk.Frame(parent, padding=20)
-        frame.pack(fill="both", expand=True)
+        frame = self._make_scrollable_tab(parent)
 
         ttk.Label(frame, text="Unpack Game Archives", style="Header.TLabel").pack(anchor="w", pady=(0, 10))
         ttk.Label(frame, text="Select a file to automatically detect its type and extract it.\nSupports: .sdat, .bar, .sharc, .pkg").pack(anchor="w", pady=(0, 20))
@@ -246,14 +356,27 @@ class HDKCommander(tk.Tk):
         self.run_hdk_command(cmd)
 
     # =========================================================================
-    # TAB 2: CREATE (sdat c, sharc c, bar c, pkg c)
+    # TAB 2: CREATE & PACK
     # =========================================================================
     def _build_create_tab(self, parent):
-        frame = ttk.Frame(parent, padding=20)
-        frame.pack(fill="both", expand=True)
+        frame = self._make_scrollable_tab(parent)
 
         ttk.Label(frame, text="Pack Folders into Archives", style="Header.TLabel").pack(anchor="w", pady=(0, 10))
-        ttk.Label(frame, text="Select the active project folder (Top Right) first!", foreground="yellow").pack(anchor="w", pady=(0, 5))
+
+        # --- Input Folder Selection ---
+        ttk.Label(frame, text="1. Select the folder you want to pack:", style="SubHeader.TLabel").pack(anchor="w", pady=(0, 5))
+
+        input_row = ttk.Frame(frame)
+        input_row.pack(fill="x", pady=(0, 10))
+
+        self.pack_input_var = tk.StringVar(value="No folder selected")
+        ttk.Label(input_row, textvariable=self.pack_input_var, foreground="#ffd700", font=(FONT_MONO, 9)).pack(side="left", fill="x", expand=True)
+        ttk.Button(input_row, text="Browse...", command=self._browse_pack_input, width=10).pack(side="right")
+
+        ttk.Separator(frame, orient="horizontal").pack(fill="x", pady=5)
+
+        # --- Options ---
+        ttk.Label(frame, text="2. Options:", style="SubHeader.TLabel").pack(anchor="w", pady=(5, 5))
 
         self.auto_compress = tk.BooleanVar(value=False)
         chk_comp = ttk.Checkbutton(frame, text="Auto-Optimize: Compress assets before packing (slower build)", variable=self.auto_compress)
@@ -261,13 +384,18 @@ class HDKCommander(tk.Tk):
 
         self.compress_algo = tk.StringVar(value="lzma")
         algo_frame = ttk.Frame(frame)
-        algo_frame.pack(anchor="w", pady=(0, 15))
+        algo_frame.pack(anchor="w", pady=(0, 10))
         ttk.Label(algo_frame, text="  Algorithm: ").pack(side="left")
         ttk.Radiobutton(algo_frame, text="LZMA (default, better ratio)", variable=self.compress_algo, value="lzma").pack(side="left", padx=5)
         ttk.Radiobutton(algo_frame, text="ZLib (faster)", variable=self.compress_algo, value="zlib").pack(side="left", padx=5)
 
-        btn_sdat = ttk.Button(frame, text="Pack Folder → .SDAT (Scene File)", command=lambda: self.pack_dialog("sdat"))
-        btn_sdat.pack(fill="x", pady=5, ipady=5)
+        ttk.Separator(frame, orient="horizontal").pack(fill="x", pady=5)
+
+        # --- Pack Buttons ---
+        ttk.Label(frame, text="3. Choose output format:", style="SubHeader.TLabel").pack(anchor="w", pady=(5, 5))
+
+        btn_sdat = ttk.Button(frame, text="Pack Folder → .SDAT (Scene File)", command=lambda: self.pack_dialog("sdat"), style="Accent.TButton")
+        btn_sdat.pack(fill="x", pady=5, ipady=8)
 
         btn_bar = ttk.Button(frame, text="Pack Folder → .BAR (Archive)", command=lambda: self.pack_dialog("bar"))
         btn_bar.pack(fill="x", pady=5, ipady=5)
@@ -275,22 +403,48 @@ class HDKCommander(tk.Tk):
         btn_sharc = ttk.Button(frame, text="Pack Folder → .SHARC (Sound/Anim)", command=lambda: self.pack_dialog("sharc"))
         btn_sharc.pack(fill="x", pady=5, ipady=5)
 
-        ttk.Separator(frame, orient="horizontal").pack(fill="x", pady=15)
+        ttk.Separator(frame, orient="horizontal").pack(fill="x", pady=10)
         btn_pkg = ttk.Button(frame, text="Pack Folder → .PKG (Installable Package)", command=lambda: self.pack_dialog("pkg"))
         btn_pkg.pack(fill="x", pady=5, ipady=5)
+
+    def _browse_pack_input(self):
+        initial_dir = None
+        proj = self.project_path.get()
+        if proj and proj != "No Folder Selected" and os.path.isdir(proj):
+            initial_dir = proj
+
+        folder = filedialog.askdirectory(title="Select Folder to Pack", initialdir=initial_dir)
+        if folder:
+            self.pack_input_var.set(folder)
+            self.log(f"Pack input set to: {folder}", "info")
+            self._save_settings()
 
     def pack_dialog(self, format_type):
         if not self._check_binary_ready(self.hdk_path_var, "HDK"): return
 
-        input_dir = self.project_path.get()
-        if input_dir == "No Folder Selected" or not os.path.isdir(input_dir):
-            messagebox.showerror("Error", "Please select a valid Project Folder using the 'Browse' button at the top.")
+        input_dir = self.pack_input_var.get()
+        if input_dir == "No folder selected" or not os.path.isdir(input_dir):
+            messagebox.showerror("Error", "Please select a folder to pack using the 'Browse...' button in the Create & Pack tab.")
             return
+
+        base_name = os.path.basename(input_dir)
+        if base_name.endswith("_extracted"):
+            base_name = base_name.replace("_extracted", "")
+        base_name, _ = os.path.splitext(base_name)
+        clean_default_name = f"{base_name}.{format_type}"
+
+        initial_dir = None
+        proj = self.project_path.get()
+        if proj and proj != "No Folder Selected" and os.path.isdir(proj):
+            initial_dir = proj
+        else:
+            initial_dir = os.path.dirname(input_dir)
 
         output_file = filedialog.asksaveasfilename(
             defaultextension=f".{format_type}",
             filetypes=[(f"{format_type.upper()} File", f"*.{format_type}")],
-            initialfile=os.path.basename(input_dir) + f".{format_type}"
+            initialfile=clean_default_name,
+            initialdir=initial_dir
         )
         if not output_file: return
 
@@ -311,27 +465,33 @@ class HDKCommander(tk.Tk):
 
         for root, dirs, files in os.walk(directory):
             for file in files:
-                if any(file.lower().endswith(ext) for ext in extensions):
+                has_known_ext = any(file.lower().endswith(ext) for ext in extensions)
+                has_no_ext = "." not in file
+
+                if has_known_ext or has_no_ext:
                     full_path = os.path.join(root, file)
+                    temp_path = full_path + ".tmp"
+
                     try:
                         startupinfo = self._get_startupinfo()
                         subprocess.run(
-                            [hdk_path, "compress", "c", "-a", algo, full_path],
+                            [hdk_path, "compress", "c", "-a", algo, "-i", full_path, "-o", temp_path],
                             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                             startupinfo=startupinfo
                         )
+                        shutil.move(temp_path, full_path)
                         count += 1
                     except Exception:
-                        self.log(f"  Warning: Could not compress {file}", "error")
+                        if os.path.exists(temp_path):
+                            os.remove(temp_path)
 
         self.log(f"Optimization Complete. Compressed {count} files.", "success")
 
     # =========================================================================
-    # TAB 3: RE-SHARC (hdk-resharc — raw file paths, no flags)
+    # TAB 3: RE-SHARC
     # =========================================================================
     def _build_resharc_tab(self, parent):
-        frame = ttk.Frame(parent, padding=20)
-        frame.pack(fill="both", expand=True)
+        frame = self._make_scrollable_tab(parent)
 
         ttk.Label(frame, text="BAR → SHARC Normalizer", style="Header.TLabel").pack(anchor="w", pady=(0, 5))
 
@@ -403,7 +563,6 @@ class HDKCommander(tk.Tk):
         self._run_resharc(sdat_files)
 
     def _run_resharc(self, file_list):
-        """Execute hdk-resharc with raw file paths (no flags)."""
         resharc_path = self.resharc_path_var.get()
         full_cmd = [resharc_path] + file_list
 
@@ -450,16 +609,7 @@ class HDKCommander(tk.Tk):
     # TAB 4: ADVANCED TOOLS
     # =========================================================================
     def _build_tools_tab(self, parent):
-        canvas = tk.Canvas(parent, bg="#1e1e1e", highlightthickness=0)
-        scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
-        frame = ttk.Frame(canvas, padding=20)
-
-        frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.create_window((0, 0), window=frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
+        frame = self._make_scrollable_tab(parent)
 
         # ---- MAP TOOL ----
         ttk.Label(frame, text="Map Tool (Restore File Names)", style="Header.TLabel").pack(anchor="w")
@@ -541,10 +691,19 @@ class HDKCommander(tk.Tk):
 
     def compress_dialog(self, mode):
         if not self._check_binary_ready(self.hdk_path_var, "HDK"): return
-        f = filedialog.askopenfilename()
+
+        f = filedialog.askopenfilename(title="Select file to compress/decompress")
         if not f: return
+
+        default_suffix = ".compressed" if mode == "c" else ".decompressed"
+        out_f = filedialog.asksaveasfilename(
+            title="Save output as...",
+            initialfile=os.path.basename(f) + default_suffix
+        )
+        if not out_f: return
+
         algo = self.tool_compress_algo.get()
-        cmd = ["compress", mode, "-a", algo, f]
+        cmd = ["compress", mode, "-a", algo, "-i", f, "-o", out_f]
         self.run_hdk_command(cmd)
 
     def crypt_dialog(self, mode):
@@ -666,7 +825,6 @@ class HDKCommander(tk.Tk):
     # CORE UTILITIES
     # =========================================================================
     def _get_startupinfo(self):
-        """Windows-only: hide console popups. Returns None on Mac/Linux."""
         if IS_WINDOWS:
             si = subprocess.STARTUPINFO()
             si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
@@ -674,7 +832,6 @@ class HDKCommander(tk.Tk):
         return None
 
     def _browse_exe(self, name, path_var):
-        """Platform-aware file browser — no .exe filter on Mac/Linux."""
         if IS_WINDOWS:
             ftypes = [("Executable", "*.exe"), ("All Files", "*.*")]
         elif IS_MAC:
@@ -684,7 +841,6 @@ class HDKCommander(tk.Tk):
 
         f = filedialog.askopenfilename(title=f"Locate {name} executable", filetypes=ftypes)
         if f:
-            # On Mac/Linux, make sure it's executable
             if not IS_WINDOWS and not os.access(f, os.X_OK):
                 result = messagebox.askyesno("Not Executable",
                     f"'{os.path.basename(f)}' is not marked as executable.\n\n"
@@ -699,12 +855,14 @@ class HDKCommander(tk.Tk):
 
             path_var.set(f)
             self.log(f"{name} binary set to: {f}", "info")
+            self._save_settings()
 
     def select_project(self):
         path = filedialog.askdirectory()
         if path:
             self.project_path.set(path)
             self.log(f"Active Project set to: {path}", "info")
+            self._save_settings()
 
     def _check_binary_ready(self, path_var, label):
         path = path_var.get()
